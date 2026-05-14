@@ -11,7 +11,14 @@ export default function Player({ blocks }: { blocks: React.ComponentType[] }) {
   const [wavingAndTurn, setWavingAndTurn] = useState<THREE.AnimationAction>(
     null!
   );
-  const [jumping, setJumping] = useState<THREE.AnimationAction>(null!);
+  // jumping 用两个独立 action（基于克隆的 clip）交替播放，
+  // 避免同一个 action 反复 reset 时从 clamp 末帧瞬切回首帧造成抖动
+  const [jumpingActions, setJumpingActions] = useState<THREE.AnimationAction[]>(
+    []
+  );
+  const activeJumpActionRef = useRef<THREE.AnimationAction | null>(null);
+  const nextJumpIdxRef = useRef(0);
+  const jumpDurationRef = useRef(0);
   const [turnBack, setTurnBack] = useState<THREE.AnimationAction>(null!);
   const [clap, setClap] = useState<THREE.AnimationAction>(null!);
 
@@ -24,7 +31,7 @@ export default function Player({ blocks }: { blocks: React.ComponentType[] }) {
   const [smoothedCameraTarget] = useState(() => new THREE.Vector3(0, 0, 0));
   const jumpProgress = 10 / 47; // 跳跃动画总帧数47帧，第10帧开始起跳
   const landingProgress = 28 / 47; // 跳跃动画总帧数47帧，第28帧开始落地
-  const jumpStartTime = useRef(0); // 记录跳跃时间
+  const isJumpingRef = useRef(false); // 是否处于跳跃阶段
   const startJumpPosition = useRef<THREE.Vector3 | null>(null); // 记录跳跃前的位置
 
   // 游戏的状态
@@ -34,12 +41,41 @@ export default function Player({ blocks }: { blocks: React.ComponentType[] }) {
   const hasPlayedBackgroundMusic = useRef(false);
   const hasPlayedJumpSound = useRef(false);
 
+  // gameOver 流程中的两层 setTimeout 和烟花的 cancel 函数，需要在重启时统一清理
+  const gameOverTimeoutsRef = useRef<number[]>([]);
+  const gameOverCancelledRef = useRef(false);
+  const cancelFireworksRef = useRef<(() => void) | null>(null);
+
+  // 停止烟花音效并重置播放位置
+  const stopFireworksSound = useCallback(() => {
+    const audio = document.getElementById(
+      'fireworks-audio'
+    ) as HTMLAudioElement | null;
+    if (audio) {
+      audio.pause();
+      audio.currentTime = 0;
+    }
+  }, []);
+
+  // 统一清理 gameOver 留下的副作用（定时器 / 烟花粒子 / 烟花音效）
+  const clearGameOverEffects = useCallback(() => {
+    gameOverCancelledRef.current = true;
+    gameOverTimeoutsRef.current.forEach(id => clearTimeout(id));
+    gameOverTimeoutsRef.current = [];
+    if (cancelFireworksRef.current) {
+      cancelFireworksRef.current();
+      cancelFireworksRef.current = null;
+    }
+    stopFireworksSound();
+  }, [stopFireworksSound]);
+
   const changeAction = useCallback(
     (
       startAction: THREE.AnimationAction,
       endAction?: THREE.AnimationAction,
       loopMode: THREE.AnimationActionLoopStyles = THREE.LoopOnce,
-      loopCount: number = 1
+      loopCount: number = 1,
+      fadeDuration: number = 0.15
     ) => {
       if (!endAction) {
         // 直接播放新动作
@@ -49,7 +85,7 @@ export default function Player({ blocks }: { blocks: React.ComponentType[] }) {
         startAction.play();
       } else {
         // 交叉淡入新动作，播放endAction
-        startAction.crossFadeTo(endAction, 0.05, true);
+        startAction.crossFadeTo(endAction, fadeDuration, true);
         endAction.reset();
         endAction.setLoop(loopMode, loopCount);
         endAction.clampWhenFinished = loopMode === THREE.LoopOnce;
@@ -57,6 +93,20 @@ export default function Player({ blocks }: { blocks: React.ComponentType[] }) {
       }
     },
     []
+  );
+
+  // 触发一次跳跃：从 fromAction 平滑切到下一个空闲的 jumping action
+  const triggerJump = useCallback(
+    (fromAction: THREE.AnimationAction) => {
+      if (jumpingActions.length < 2) return;
+      const nextAction = jumpingActions[nextJumpIdxRef.current];
+      nextJumpIdxRef.current = 1 - nextJumpIdxRef.current;
+      changeAction(fromAction, nextAction);
+      activeJumpActionRef.current = nextAction;
+      isJumpingRef.current = true;
+      startJumpPosition.current = mouse.position.clone();
+    },
+    [jumpingActions, changeAction, mouse]
   );
 
   // 播放背景音乐
@@ -106,11 +156,17 @@ export default function Player({ blocks }: { blocks: React.ComponentType[] }) {
       const newMixer = new THREE.AnimationMixer(mouse);
       setMixer(newMixer);
       const clapAction = newMixer.clipAction(animations[0]);
-      const jumpAction = newMixer.clipAction(animations[2]);
+      // 通过 clone 一份 jumping clip，得到两个互相独立的 AnimationAction，
+      // 用于跳跃之间的交叉淡入，避免同一 action 重置造成的姿态瞬切
+      const jumpClipA = animations[2];
+      const jumpClipB = animations[2].clone();
+      const jumpActionA = newMixer.clipAction(jumpClipA);
+      const jumpActionB = newMixer.clipAction(jumpClipB);
+      jumpDurationRef.current = jumpClipA.duration;
       const turnBackAction = newMixer.clipAction(animations[3]);
       const waveAndTurnAction = newMixer.clipAction(animations[4]);
       setWavingAndTurn(waveAndTurnAction);
-      setJumping(jumpAction);
+      setJumpingActions([jumpActionA, jumpActionB]);
       setTurnBack(turnBackAction);
       setClap(clapAction);
       // 跳跃目标位置
@@ -126,6 +182,13 @@ export default function Player({ blocks }: { blocks: React.ComponentType[] }) {
     }
   }, [mouse, animations, initialPosition]);
 
+  // 组件卸载时兜底清理：避免退出页面后定时器、烟花粒子、烟花音效仍在运行
+  useEffect(() => {
+    return () => {
+      clearGameOverEffects();
+    };
+  }, [clearGameOverEffects]);
+
   useEffect(() => {
     // 重新开始游戏
     if (prevGameState.current !== 'idle' && gameState === 'q1') {
@@ -133,7 +196,18 @@ export default function Player({ blocks }: { blocks: React.ComponentType[] }) {
       mouse.position.copy(initialPosition);
       // 重置跳跃音效标志，确保新的游戏循环可以从头开始播放音效
       hasPlayedJumpSound.current = false;
-      changeAction(clap, wavingAndTurn);
+      // 清理上一局 gameOver 遗留的副作用：未执行的定时器、烟花粒子、烟花音效
+      clearGameOverEffects();
+      // 停掉可能仍处于 clamp/循环状态的所有动作，避免它们以权重 0 驻留在 mixer 中
+      jumpingActions.forEach(a => a.stop());
+      if (clap) clap.stop();
+      if (turnBack) turnBack.stop();
+      if (wavingAndTurn) wavingAndTurn.stop();
+      activeJumpActionRef.current = null;
+      isJumpingRef.current = false;
+      nextJumpIdxRef.current = 0;
+      // 位置是瞬移回初始位置，没必要再 crossFade，直接硬切到 wavingAndTurn
+      changeAction(wavingAndTurn);
     }
     if (!progress.current.includes(gameState) && gameState !== 'idle') {
       progress.current.push(gameState);
@@ -146,13 +220,12 @@ export default function Player({ blocks }: { blocks: React.ComponentType[] }) {
           hasPlayedBackgroundMusic.current = true;
         }
       } else if (gameState === 'q2') {
-        changeAction(wavingAndTurn, jumping);
-        jumpStartTime.current = Date.now(); // 记录跳跃开始时间
-        startJumpPosition.current = mouse.position.clone(); // 记录跳跃前的位置
+        // 第一次跳跃：从 wavingAndTurn 平滑切到第一个 jumping action
+        triggerJump(wavingAndTurn);
       } else {
-        changeAction(jumping);
-        jumpStartTime.current = Date.now(); // 记录跳跃开始时间
-        startJumpPosition.current = mouse.position.clone(); // 记录跳跃前的位置
+        // 后续跳跃 / gameOver：从当前正在播放的 jumping action 切到另一个
+        const fromAction = activeJumpActionRef.current ?? wavingAndTurn;
+        triggerJump(fromAction);
       }
     }
   }, [gameState]);
@@ -162,22 +235,30 @@ export default function Player({ blocks }: { blocks: React.ComponentType[] }) {
       mixer.update(delta);
     }
     // 同步跳跃动画和位置变化
-    if (jumpStartTime.current && startJumpPosition.current) {
+    const activeJump = activeJumpActionRef.current;
+    if (
+      isJumpingRef.current &&
+      activeJump &&
+      startJumpPosition.current &&
+      jumpDurationRef.current > 0
+    ) {
       // 设置跳跃目标索引
+      const lastState = progress.current.slice(-1)[0];
       const targetIndex =
-        progress.current.slice(-1)[0] === 'gameOver'
+        lastState === 'gameOver'
           ? targetPosition.current.length - 1
-          : parseInt(progress.current.slice(-1)[0].charAt(1)) - 1; // q2->0, q3->1, q4->2, q5->3
-      // 获取跳跃动画的持续时间
-      const jumpClip = jumping.getClip();
-      const jumpDuration = jumpClip.duration;
+          : parseInt(lastState.charAt(1)) - 1; // q2->0, q3->1, q4->2, q5->3
 
-      // 计算动画播放进度 (0 to 1)
-      const elapsed = (Date.now() - jumpStartTime.current) / 1000;
-      const animationProgress = Math.min(elapsed / jumpDuration, 1);
+      // 用 mixer 内部时间计算进度，确保与骨骼动画完全同步
+      const animationProgress = Math.min(
+        activeJump.time / jumpDurationRef.current,
+        1
+      );
 
-      // 只有当动画进度超过起跳阈值时才开始移动位置，第10帧开始起跳
-      if (animationProgress >= jumpProgress) {
+      if (animationProgress < jumpProgress) {
+        // 起跳准备阶段（0~10帧）：显式锁定根位置，避免任何漂移造成的视觉抖动
+        mouse.position.copy(startJumpPosition.current);
+      } else {
         // 只在跳跃刚开始时播放一次跳跃音效
         if (!hasPlayedJumpSound.current) {
           playJumpSound();
@@ -187,17 +268,26 @@ export default function Player({ blocks }: { blocks: React.ComponentType[] }) {
         // 如果进度已经超过着陆点，则直接设置到目标位置
         if (animationProgress >= landingProgress) {
           mouse.position.copy(targetPosition.current[targetIndex]);
-          jumpStartTime.current = 0;
+          isJumpingRef.current = false;
           // 重置跳跃音效标志，以便下次跳跃可以再次播放
           hasPlayedJumpSound.current = false;
           if (gameState === 'gameOver') {
-            setTimeout(async () => {
-              changeAction(jumping, turnBack);
-              await new Promise<void>(resolve => setTimeout(resolve, 1000));
-              changeAction(turnBack, clap, THREE.LoopRepeat, Infinity);
-              confettiFireworks();
-              playFireworksSound();
+            // 新的 gameOver 流程开始：重置取消标记，并登记两层 setTimeout
+            gameOverCancelledRef.current = false;
+            gameOverTimeoutsRef.current = [];
+            const firstTimer = window.setTimeout(() => {
+              if (gameOverCancelledRef.current) return;
+              changeAction(activeJump, turnBack);
+              const secondTimer = window.setTimeout(() => {
+                if (gameOverCancelledRef.current) return;
+                changeAction(turnBack, clap, THREE.LoopRepeat, Infinity);
+                // 保存烟花 cancel 函数，重启时可统一清理
+                cancelFireworksRef.current = confettiFireworks();
+                playFireworksSound();
+              }, 1000);
+              gameOverTimeoutsRef.current.push(secondTimer);
             }, 1000);
+            gameOverTimeoutsRef.current.push(firstTimer);
           }
         } else {
           // 计算在起跳和着陆之间的插值进度

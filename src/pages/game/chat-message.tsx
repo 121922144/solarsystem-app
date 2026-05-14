@@ -5,6 +5,7 @@ import {
 } from '@copilotkit/react-ui';
 import { Message } from '@copilotkit/shared';
 import { UserAvatar, AssistantAvatar } from './avatar';
+import { HIDDEN_USER_PREFIX } from './types';
 
 // 提取消息文本内容的辅助函数
 function extractMessageText(message: Message | undefined): string {
@@ -40,6 +41,11 @@ function extractMessageText(message: Message | undefined): string {
 
 export function UserMessage({ message }: UserMessageProps) {
   const messageText = extractMessageText(message);
+
+  // 带 HIDDEN_USER_PREFIX 前缀的消息属于"发给 AI 的内部指令"，不在聊天框中渲染
+  if (messageText.startsWith(HIDDEN_USER_PREFIX)) {
+    return null;
+  }
 
   return (
     <div className="flex items-start gap-4 py-4 flex-row-reverse">
