@@ -11,6 +11,7 @@ import { useCopilotChatHeadless_c } from '@copilotkit/react-core';
 import { randomId } from '@copilotkit/shared';
 import { useCopilotChatSuggestions } from '@copilotkit/react-ui';
 import { useEffect, useRef } from 'react';
+import { useTTS } from './use-tts';
 
 // 根据当前题号计算下一题题号
 const getNextQuestionNumber = (current: string): string => {
@@ -23,6 +24,7 @@ export function useGameVisualizer() {
   const { gameState, setGameState, questionList, setQuestionList } =
     useGlobalState();
   const { sendMessage } = useCopilotChatHeadless_c();
+  const { resetSeen: resetTTSSeen, stop: stopTTS } = useTTS();
 
   // 用于"选答后兜底再催一次"的定时器，避免 AI 漏调用工具时卡住
   const retryTimerRef = useRef<number | null>(null);
@@ -39,6 +41,15 @@ export function useGameVisualizer() {
   useEffect(() => {
     cancelRetryTimer();
   }, [gameState]);
+
+  // 新一局开始（gameState 切到 'q1'）时，清空 TTS 已读 id 集合并停掉残留播放。
+  // 否则第二局的 question:q1 ~ question:q8 会因 id 命中"已读"集合而被静音。
+  useEffect(() => {
+    if (gameState === 'q1') {
+      stopTTS();
+      resetTTSSeen();
+    }
+  }, [gameState, stopTTS, resetTTSSeen]);
 
   useCopilotChatSuggestions(
     {

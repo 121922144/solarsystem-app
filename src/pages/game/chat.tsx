@@ -37,7 +37,7 @@ export default function Chat() {
   }, [callSendMessage]);
 
   return (
-    <div className="flex flex-col h-full max-h-full w-full p-4 rounded-2xl bg-[#747474]/30 backdrop-blur-md border-t-2 border-l-1 border-white/20 color-white chat-box">
+    <div className="flex flex-col h-full max-h-full w-full p-2 rounded-2xl bg-[#747474]/30 backdrop-blur-md border-t-2 border-l-1 border-white/20 color-white chat-box">
       <div
         className="flex-1 w-full overflow-hidden"
         style={

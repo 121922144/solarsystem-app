@@ -2,6 +2,7 @@ import { CopilotKit } from '@copilotkit/react-core';
 import '@copilotkit/react-ui/styles.css';
 import '@/styles/game.scss';
 import { GlobalStateProvider } from './lib/use-global-state';
+import { TTSProvider } from './lib/use-tts';
 import Planets from './planets';
 import Chat from './chat';
 import { useState, useEffect, useCallback } from 'react';
@@ -49,61 +50,63 @@ export default function Game() {
   return (
     <CopilotKit publicApiKey={copilotApiKey || ''}>
       <GlobalStateProvider>
-        <div className="mask"></div>
-        <div className="h-screen w-screen grid grid-cols-[1fr_500px] relative z-1">
-          <div>
-            <Planets />
+        <TTSProvider>
+          <div className="mask"></div>
+          <div className="h-screen w-screen grid grid-cols-[1fr_500px] relative z-1">
+            <div>
+              <Planets />
+            </div>
+            <div className="py-5 pr-5 overflow-hidden">
+              <Chat />
+            </div>
           </div>
-          <div className="py-5 pr-5 overflow-hidden">
-            <Chat />
-          </div>
-        </div>
 
-        <audio
-          id="background-music"
-          src="/music/gattina.mp3"
-          preload="auto"
-          loop={true}
-          style={{
-            display: 'none',
-          }}
-        />
-        <audio
-          id="jump-audio"
-          src="/music/jump2.mp3"
-          preload="auto"
-          style={{ display: 'none' }}
-        />
-        <audio
-          id="fireworks-audio"
-          src="/music/fireworks.mp3"
-          preload="auto"
-          style={{ display: 'none' }}
-        />
-        <audio
-          id="error-audio"
-          src="/music/error.mp3"
-          preload="auto"
-          style={{ display: 'none' }}
-        />
-        <audio
-          id="correct-audio"
-          src="/music/correct.mp3"
-          preload="auto"
-          style={{ display: 'none' }}
-        />
-        <button
-          onClick={togglePlayPause}
-          className="absolute z-1 bottom-4 left-4 border-0 flex items-center justify-center rounded-full bg-white/20 cursor-pointer"
-        >
-          <img
-            src={musicSvg}
-            alt="音乐控制"
-            className={`w-10 h-10 transition-transform duration-150 music-note-rotate ${
-              isPlaying ? 'music-note-running' : 'music-note-paused'
-            }`}
+          <audio
+            id="background-music"
+            src="/music/gattina.mp3"
+            preload="auto"
+            loop={true}
+            style={{
+              display: 'none',
+            }}
           />
-        </button>
+          <audio
+            id="jump-audio"
+            src="/music/jump2.mp3"
+            preload="auto"
+            style={{ display: 'none' }}
+          />
+          <audio
+            id="fireworks-audio"
+            src="/music/fireworks.mp3"
+            preload="auto"
+            style={{ display: 'none' }}
+          />
+          <audio
+            id="error-audio"
+            src="/music/error.mp3"
+            preload="auto"
+            style={{ display: 'none' }}
+          />
+          <audio
+            id="correct-audio"
+            src="/music/correct.mp3"
+            preload="auto"
+            style={{ display: 'none' }}
+          />
+          <button
+            onClick={togglePlayPause}
+            className="absolute z-1 bottom-4 left-4 border-0 flex items-center justify-center rounded-full bg-white/20 cursor-pointer"
+          >
+            <img
+              src={musicSvg}
+              alt="音乐控制"
+              className={`w-10 h-10 transition-transform duration-150 music-note-rotate ${
+                isPlaying ? 'music-note-running' : 'music-note-paused'
+              }`}
+            />
+          </button>
+        </TTSProvider>
       </GlobalStateProvider>
     </CopilotKit>
   );
